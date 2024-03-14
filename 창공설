@@ -1,0 +1,604 @@
+#include "WiFiEsp.h"
+#include "SoftwareSerial.h"
+
+SoftwareSerial Serial1(2, 3); // RX, TX
+
+class CharSplitter {
+  private:
+  char _char;
+  char _temp[100];
+  int _temp_len;
+  char _line[100];
+  public:
+  CharSplitter(char delimiter) {
+    _char = delimiter;
+    _temp[0] = '\0';
+    _temp_len = 0;
+    _line[0] = '\0';
+  }
+  bool write(char ch) {
+    if(ch == _char) {
+      strcpy(_line, _temp);
+      _temp[0] = '\0';
+      _temp_len = 0;
+      return true;
+    } else {
+      _temp[_temp_len] = ch;
+      _temp[_temp_len+1] = '\0';
+      _temp_len++;
+      return false;
+    }
+  }
+  char* line() {
+    return _line;
+  }
+};
+
+char ssid[] = "monad";            // your network SSID (name)
+char pass[] = "freemonad";        // your network password
+int status = WL_IDLE_STATUS;     // the Wifi radio's status
+
+char server[] = "112.219.28.28";
+int port = 5000;
+
+WiFiEspClient client;
+
+CharSplitter char_splitter('\n');
+
+
+
+// ========== MOVEMENTS
+char movements[50];
+int movements_len = 0;
+unsigned long MOVING_GAP_TIME = 200;
+unsigned long last_moving_time = 0;
+bool last_moving = false;
+
+// ========== ROTATION
+bool new_rotate_ccw = true;
+// bool rotate_skip_one;
+bool last_black_white;
+bool new_rotate_cw = true;
+bool last_white_black;
+
+// ========== LINE TRACER
+#define dir1 6 // 12 //왼쪽모터
+#define dir2 7 // 13
+#define Lsp 5 // 11
+#define dir3 8
+#define dir4 9
+#define Rsp 10
+#define LIR A2 //A0
+#define RIR A0 //A2
+
+#define sens(x)  (analogRead(x) < standard) //참이면 검은 라인 위에 있는 것
+
+int linetracing_state = -1;
+
+// COEFFS
+unsigned long BOOST_TIME = 40; // 70; // 50;
+unsigned long last_boost_time_l = 0;
+unsigned long last_boost_time_r = 0;
+// int level_l = 0;
+// int level_r = 0;
+// int standard = 50;
+// int full = 230; // 100;
+// int speed = 60; // 38;
+// int rsp = 0;
+// int state = -1;
+int level_l = 0;
+int level_r = 0;
+int standard = 300; // 50;
+int full = 190; // 190; // 180; // 200; // 100;
+int speed = 82; // 70; // 77; // 74; // 80; // 90; // 80; // 38; // 38;
+int rotation_speed = 74; // 65; // 74; // 78; // 93(GOOD?);
+int rsp = 0;
+int state = -1;
+
+void linetracing_setup() {
+    pinMode(dir1, OUTPUT);
+    pinMode(dir2, OUTPUT);
+    pinMode(Rsp, OUTPUT);
+    pinMode(dir3, OUTPUT);
+    pinMode(dir4, OUTPUT);
+    pinMode(Lsp, OUTPUT);
+    pinMode(LIR, INPUT);
+    pinMode(RIR, INPUT);
+    digitalWrite(dir1, HIGH); 
+    digitalWrite(dir2, LOW);
+    digitalWrite(dir3, HIGH);
+    digitalWrite(dir4, LOW);
+}
+
+void setup() {
+  Serial.begin(9600);
+  Serial1.begin(9600);
+  WiFi.init(&Serial1);
+
+  // // check for the presence of the shield
+  if (WiFi.status() == WL_NO_SHIELD) {
+    Serial.println("WiFi shield not present");
+    // don't continue
+    while (true);
+  }
+  
+  // attempt to connect to WiFi network
+  while ( status != WL_CONNECTED) {
+    Serial.print("Attempting to connect to WPA SSID: ");
+    Serial.println(ssid);
+    // Connect to WPA/WPA2 network
+    status = WiFi.begin(ssid, pass);
+  }
+
+  Serial.println("Connected to the network");
+
+  linetracing_setup();
+  rfid_setup();
+
+  connect();
+}
+
+// Robot state
+bool forwarding = false;
+int number_to_rotate_ccw = 0;
+int number_to_rotate_cw = 0;
+
+// Network state
+enum NetworkState {
+  NOT_READY = 0,
+  READY = 1,
+  DISPOSED = 2
+};
+
+bool init_sent = false;
+NetworkState network_state = NOT_READY;
+
+char PW[] = "WOWbb";
+char ROBOT_ID[] = "ROBOT_2";
+
+void connect() {
+  init_sent = false;
+  network_state = NOT_READY;
+  client = WiFiEspClient();
+  client.connect(server, port);
+}
+
+void handle(char* line) {
+  Serial.print("GOT LINE: ");
+  Serial.println(line);
+  if(network_state == NOT_READY) {
+    // Okay
+    if(line[0] == 'K') {
+      network_state = READY;
+      Serial.println("OK SIGN");
+    }
+  }
+  if(network_state == READY) {
+    // if(line[0] == 'L') {
+    //   int level = atoi(&line[2]);
+    //   analogWrite(5, level);
+    // }
+    // if(line[0] == 'F') {
+    //   int freq = atoi(&line[2]);
+    //   tone(6, freq);
+    // }
+    // if(line[0] == 'S') {
+    //   noTone(6);
+    // }
+    if(line[0] == 'F') {
+      forwarding = true;
+    }
+    if(line[0] == 'R') {
+      number_to_rotate_ccw = atoi(&line[2]);
+      if(number_to_rotate_ccw == 0) {
+        new_rotate_ccw = true;
+      }
+    }
+    if(line[0] == 'S') {
+      forwarding = false;
+    }
+    if(line[0] == 'M') {
+      for(int i = 0; i < strlen(&line[2]); i++)
+        movements[strlen(&line[2]) - 1 - i] = line[2 + i];
+      movements[strlen(&line[2])] = '\0';
+      movements_len = strlen(&line[2]);
+    }
+  }
+}
+
+// ========= RFID
+// 라이브러리 해더 
+#include <SPI.h>
+#include <MFRC522.h>
+
+// SS(Chip Select)과 RST(Reset) 핀 설정
+// 나머지 PIN은 SPI 라이브러리를 사용하기에 별도의 설정이 필요없다.
+#define SS_PIN 4 //슬레이브 설정
+#define RST_PIN 19
+
+// 라이브러리 생성
+MFRC522 rfid(SS_PIN, RST_PIN); // Instance of the class
+
+MFRC522::MIFARE_Key key; 
+
+//이전 ID와 비교하기위한 변수
+byte nuidPICC[4];
+
+void rfid_setup() { 
+  SPI.begin(); // SPI 시작
+  rfid.PCD_Init(); // RFID 시작
+
+  //초기 키 ID 초기화
+  for (byte i = 0; i < 6; i++) {
+    key.keyByte[i] = 0xFF;
+  }
+  
+  Serial.println(F("This code scan the MIFARE Classsic NUID."));
+  Serial.print(F("Using the following key:"));
+  printHex(key.keyByte, MFRC522::MF_KEY_SIZE);
+}
+ 
+void rfid_poll() {
+  // 카드가 인식되었다면 다음으로 넘어가고 아니면 더이상 
+  // 실행 안하고 리턴
+  if ( ! rfid.PICC_IsNewCardPresent())
+    return;
+
+  // ID가 읽혀졌다면 다음으로 넘어가고 아니면 더이상 
+  // 실행 안하고 리턴
+  if ( ! rfid.PICC_ReadCardSerial())
+    return;
+
+  //카드의 타입을 읽어온다.
+  MFRC522::PICC_Type piccType = rfid.PICC_GetType(rfid.uid.sak);
+
+  // MIFARE 방식인지 확인하고 아니면 리턴
+  if (piccType != MFRC522::PICC_TYPE_MIFARE_MINI &&  
+    piccType != MFRC522::PICC_TYPE_MIFARE_1K &&
+    piccType != MFRC522::PICC_TYPE_MIFARE_4K) {
+    Serial.println(F("Your tag is not of type MIFARE Classic."));
+    return;
+  }
+
+  // 만약 바로 전에 인식한 RF 카드와 다르다면..
+  if (rfid.uid.uidByte[0] != nuidPICC[0] || 
+    rfid.uid.uidByte[1] != nuidPICC[1] || 
+    rfid.uid.uidByte[2] != nuidPICC[2] || 
+    rfid.uid.uidByte[3] != nuidPICC[3] ) {
+    // ID를 저장해둔다.    
+    for (byte i = 0; i < 4; i++) {
+      nuidPICC[i] = rfid.uid.uidByte[i];
+    }
+   
+    //모니터 출력
+    Serial.print(F("In hex: "));
+    //16진수로 변환해서 출력
+    printHex(rfid.uid.uidByte, rfid.uid.size);
+    Serial.println();
+
+    if(forwarding) {
+      forwarding = false;
+      unsigned long current_millis = millis();
+      set_l(current_millis, 0);
+      set_r(current_millis, 0);
+
+      // client.print("DF");
+      // printHexToClient(rfid.uid.uidByte, rfid.uid.size);
+      // client.print("\n");
+
+      char str[30];
+      str[0] = 'R';
+      // printHexToClient(rfid.uid.uidByte, rfid.uid.size);
+      printHexToStr(rfid.uid.uidByte, rfid.uid.size, &str[1]);
+      str[13] = '\n';
+      str[14] = '\0';
+      client.print(str);
+
+      if(movements_len == 0) {
+        client.print("DMS\n");
+      }
+    }
+
+    // FORWARDING AAA!!!
+  }
+
+  // PICC 종료
+  rfid.PICC_HaltA();
+
+  // 암호화 종료(?)
+  rfid.PCD_StopCrypto1();
+
+  //다시 처음으로 돌아감.
+}
+
+//16진수로 변환하는 함수
+void printHex(byte *buffer, byte bufferSize) {
+  for (byte i = 0; i < bufferSize; i++) {
+    Serial.print(buffer[i] < 0x10 ? " 0" : " ");
+    Serial.print(buffer[i], HEX);
+  }
+}
+void printHexToClient(byte *buffer, byte bufferSize) {
+  for (byte i = 0; i < bufferSize; i++) {
+    client.print(buffer[i] < 0x10 ? " 0" : " ");
+    client.print(buffer[i], HEX);
+  }
+}
+char hex_table[16] = "0123456789ABCDEF";
+void printHexToStr(byte *buffer, byte bufferSize, char* ch) {
+  for (byte i = 0; i < bufferSize; i++) {
+    if(buffer[i] < 0x10) {
+      *(ch++) = ' ';
+      *(ch++) = '0';
+      *(ch++) = hex_table[buffer[i]];
+    } else {
+      *(ch++) = ' ';
+      *(ch++) = hex_table[(buffer[i] / 0x10)];
+      *(ch++) = hex_table[(buffer[i] % 0x10)];
+    }
+  }
+}
+
+//10진수로 변환하는 함수
+void printDec(byte *buffer, byte bufferSize) {
+  for (byte i = 0; i < bufferSize; i++) {
+    Serial.print(buffer[i] < 0x10 ? " 0" : " ");
+    Serial.print(buffer[i], DEC);
+  }
+}
+void printDecToClient(byte *buffer, byte bufferSize) {
+  for (byte i = 0; i < bufferSize; i++) {
+    client.print(buffer[i] < 0x10 ? " 0" : " ");
+    client.print(buffer[i], DEC);
+  }
+}
+
+unsigned long lastConnectionTime = 0;         // last time you connected to the server, in milliseconds
+const unsigned long postingInterval = 5000L; // delay between updates, in milliseconds
+unsigned long lastReadTime = 0;
+const unsigned long readInterval = 3000L;
+unsigned long lastRfidTime = 0;
+const unsigned long rfidInterval = 700L;
+
+void set_l(unsigned long current_millis, int level) {
+  if(level >= 0) {
+    digitalWrite(dir1, HIGH); 
+    digitalWrite(dir2, LOW);
+  } else {
+    digitalWrite(dir1, LOW); 
+    digitalWrite(dir2, HIGH);
+    level = -level;
+  }
+  if(level == 0) {
+    analogWrite(Lsp, 0);
+  } else {
+    if(level_l <= 50 && level > level_l) {
+      last_boost_time_l = current_millis;
+      analogWrite(Lsp, full);
+    } else {
+      if(current_millis - last_boost_time_l < BOOST_TIME && level_l >= 50) {
+        analogWrite(Lsp, full);
+      } else {
+        analogWrite(Lsp, level);
+      }
+    }
+  }
+  level_l = level;
+}
+void set_r(unsigned long current_millis, int level) {
+  if(level >= 0) {
+    digitalWrite(dir3, HIGH);
+    digitalWrite(dir4, LOW);
+  } else {
+    digitalWrite(dir3, LOW);
+    digitalWrite(dir4, HIGH);
+    level = -level;
+  }
+  if(level == 0) {
+    analogWrite(Rsp, 0);
+  } else {
+    if(level_r <= 50 && level > level_r) {
+      last_boost_time_r = current_millis;
+      analogWrite(Rsp, full);
+    } else {
+      if(current_millis - last_boost_time_r < BOOST_TIME && level_r >= 50) {
+        analogWrite(Rsp, full);
+      } else {
+        analogWrite(Rsp, level);
+      }
+    }
+  }
+  level_r = level;
+}
+
+void loop() {
+  unsigned long current_millis = millis();
+
+  // // // Wifi
+  if(!forwarding || network_state == NOT_READY) {
+    while(client.available()) {
+      char ch = client.read();
+      // Serial.println((int)ch);
+      if(char_splitter.write(ch)) {
+        handle(char_splitter.line());
+      }
+    }
+  }
+
+  // Server reconnecting
+  if (current_millis - lastConnectionTime > postingInterval) {
+    // if(network_state == READY) {
+    // client.print(random(100));
+    // client.print('\n');
+    // }
+    // if(network_state == READY && forwarding) {
+    //   client.print("I'm FORWARDING");
+    // client.print('\n');
+    // }
+    if(client.connected()) {
+      if(init_sent == false) {
+        init_sent = true;
+        client.print('I');
+        client.print(' ');
+        client.print(PW);
+        client.print(' ');
+        client.print(ROBOT_ID);
+        client.print('\n');
+      }
+    } else {
+      Serial.println("NOT CONNECTED! RECONNECT!");
+      connect();
+    }
+    lastConnectionTime = current_millis;
+  }
+
+
+  // Line tracing
+  // linetracing_poll(current_millis);
+  if(forwarding) {
+    bool sl = sens(LIR);
+    bool sr = sens(RIR);
+
+    if(!sl && sr) { //왼쪽은 흰바닥, 오른쪽은 검은 라인 위
+      linetracing_state = 0;
+      set_r(current_millis, rsp);
+      set_l(current_millis, speed);
+      // analogWrite(Lsp, full);
+    }
+    else if(sl && !sr){ //왼쪽은 검은 라인, 오른쪽은 흰 바닥
+      linetracing_state = 1;
+      set_r(current_millis, speed);
+      set_l(current_millis, rsp);
+      // analogWrite(Rsp, full);
+    }
+    else {
+      if(!sl && !sr) {
+      if(linetracing_state == 0) {
+      set_r(current_millis, rsp);
+      set_l(current_millis, speed);
+      } else if(linetracing_state == 1) {
+      set_r(current_millis, speed);
+      set_l(current_millis, rsp);
+      } else {
+      set_r(current_millis, speed);
+      set_l(current_millis, speed);
+      }
+      } else {
+      set_r(current_millis, speed);
+      set_l(current_millis, speed);
+      }
+      // set_r(current_millis, speed);
+      // set_l(current_millis, speed);
+    }
+  } else if(number_to_rotate_ccw != 0) {
+    bool sl = sens(LIR);
+    bool sr = sens(RIR);
+    if(new_rotate_ccw) {
+      // if(sl) rotate_skip_one = true;
+      // else rotate_skip_one = false;
+      last_black_white = sl && !sr;
+      new_rotate_ccw = false;
+    } else {
+      if(!last_black_white) {
+        if(sl && !sr) {
+          // if(rotate_skip_one) {
+          //   rotate_skip_one = false;
+          // } else {
+            number_to_rotate_ccw--;
+            if(number_to_rotate_ccw == 0) {
+              // client.print("DR\n");
+              new_rotate_ccw = true;
+              set_r(current_millis, 0);
+              set_l(current_millis, 0);
+              if(movements_len == 0) {
+                client.print("DMS\n");
+              }
+            }
+          // }
+        }
+      }
+    }
+    last_black_white = sl && !sr;
+    if(number_to_rotate_ccw) {
+      set_r(current_millis, rotation_speed);
+      set_l(current_millis, -rotation_speed);
+    }
+  } else if(number_to_rotate_cw != 0) {
+    bool sl = sens(LIR);
+    bool sr = sens(RIR);
+    if(new_rotate_cw) {
+      // if(sl) rotate_skip_one = true;
+      // else rotate_skip_one = false;
+      last_white_black = !sl && sr;
+      new_rotate_cw = false;
+    } else {
+      if(!last_white_black) {
+        if(!sl && sr) {
+          // if(rotate_skip_one) {
+          //   rotate_skip_one = false;
+          // } else {
+            number_to_rotate_cw--;
+            if(number_to_rotate_cw == 0) {
+              // client.print("DR\n");
+              new_rotate_cw = true;
+              set_r(current_millis, 0);
+              set_l(current_millis, 0);
+              if(movements_len == 0) {
+                client.print("DMS\n");
+              }
+            }
+          // }
+        }
+      }
+    }
+    last_white_black = !sl && sr;
+    if(number_to_rotate_cw) {
+      set_r(current_millis, -rotation_speed);
+      set_l(current_millis, rotation_speed);
+    }
+  } else {
+      set_r(current_millis, 0);
+      set_l(current_millis, 0);
+  }
+  // if(forwarding) {
+  //   // Serial.print("WTF");
+  //   linetracing_poll(current_millis);
+  //   // if (current_millis - lastRfidTime > rfidInterval) {
+  //   //   rfid_poll();
+  //   //   lastRfidTime = current_millis;
+  //   // }
+  // } else {
+  //   set_left(current_millis, 0);
+  //   set_right(current_millis, 0);
+  // }
+
+  // RFID
+  // if(forwarding) {
+    rfid_poll();
+  // }
+
+  // MOVEMENTS
+  if(movements_len > 0) {
+    if(!(forwarding || number_to_rotate_ccw != 0 || number_to_rotate_cw != 0)) {
+      if(current_millis - last_moving_time >= MOVING_GAP_TIME) {
+        char move = movements[movements_len - 1];
+        movements_len--;
+        if(move == 'L') {
+          number_to_rotate_ccw = 1;
+        } else if(move == 'R') {
+          number_to_rotate_cw = 1;
+        } else if(move == 'F') {
+          forwarding = true;
+        }
+      }
+    }
+  }
+  if(forwarding || number_to_rotate_ccw != 0 || number_to_rotate_cw != 0) {
+    last_moving_time = current_millis;
+  }
+
+  // motor_poll(current_millis);
+  // if(number_to_rotate) {
+
+  // }
+}
