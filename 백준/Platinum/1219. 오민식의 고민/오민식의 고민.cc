@@ -30,7 +30,7 @@ void dfs3(int s){
 bool BellmanFord(int S){
     for(int i = 0; i <= N; ++i) D[i] = INF;
     D[S] = -money[S];
-    for(int iter = 1; iter <= N + N; ++iter){
+    for(int iter = 1; iter <= N; ++iter){
         bool ch = false;
         for(auto [s, e, w] : G){
             if(D[s] == INF || U[s] != 3) continue;
@@ -39,7 +39,7 @@ bool BellmanFord(int S){
                 D[e] = D[s] + w - money[e];
             }
         }
-        if(iter == N + N && ch) return false;
+        if(iter == N && ch) return false;
     }
     return true;
 }
