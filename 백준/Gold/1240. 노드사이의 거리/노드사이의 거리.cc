@@ -13,14 +13,14 @@ void init(){for(int i = 1; i <= N; ++i) C[i] = 0, D[i] = INF;}
 void bfs(int s){
     init();
     D[s] = 0;
-    priority_queue<pair<int, int> > q;
+    queue<pair<int, int> > q;
     q.emplace(D[s], s);
     while(!q.empty()){
-        auto [c, v] =  q.top(); q.pop();
+        auto [c, v] =  q.front(); q.pop();
         if(C[v]) continue;
         C[v] = 1;
         for(auto [i, w] : G[v]){
-            if(D[i] > D[v] + w){
+            if(!C[i]){
                 D[i] = D[v] + w;
                 q.emplace(D[i], i);
             }
