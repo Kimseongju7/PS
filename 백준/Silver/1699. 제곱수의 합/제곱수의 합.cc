@@ -9,8 +9,7 @@ int main(){
     for(int i = 5; i <= N; ++i){
         dp[i] = 101010;
         for(int j = 1; j * j <= i; ++j){
-            if(j * j <= i) dp[i] = min(dp[i], 1 + dp[i - j * j]);
-            else dp[i] = min(dp[i], dp[j] + dp[i - j]);
+            dp[i] = min(dp[i], 1 + dp[i - j * j]);
         }
     }
     cout << dp[N];
