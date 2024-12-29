@@ -26,7 +26,7 @@ int main(){
             G[i].emplace_back(v);
         }
         dap += dfs(i);
-        visitNum++;
+        visitNum++;//
         dap += dfs(i);
         visitNum++;
     }
