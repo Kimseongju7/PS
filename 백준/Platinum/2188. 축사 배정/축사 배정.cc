@@ -26,8 +26,6 @@ int main(){
             cin >> v;
             G[i].emplace_back(v);
         }
-    }
-    for(int i = 1; i <= N; ++i){
         dap += dfs(i);
         ++visitNum;
     }
