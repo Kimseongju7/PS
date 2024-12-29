@@ -30,8 +30,6 @@ int main(){
         for(int i = 1; i <= N; ++i){
             int a, b; cin >> a >> b;
             G[i][0] = a; G[i][1] = b;
-        }
-        for(int i = 1; i <= N; ++i){
             dap += dfs(i);
             ++visitNum;
         }
