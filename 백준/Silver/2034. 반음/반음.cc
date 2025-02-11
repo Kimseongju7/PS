@@ -14,7 +14,7 @@ int main(){
         if(P[st] == 'X') continue;
         for(int j = 1; j <= N; ++j){
             end = end + arr[j];
-            if(end < 'X') end += size;
+            if(end < 0) end += size;
             end %= size;
             if(P[end] == 'X') break;
             if(j == N) cout << P[st] << ' ' << P[end] << '\n';
