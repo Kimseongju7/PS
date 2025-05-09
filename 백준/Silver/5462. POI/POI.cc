@@ -2,7 +2,7 @@
 #include<algorithm>
 using namespace std;
 
-int B[2020][2020] = {};
+
 
 typedef struct{
     int score;
@@ -21,7 +21,7 @@ int main(){
     int N, T, P;
     Paricipant A[2020] = {};
     int score[2020] = {};
-    
+    int B[2020][2020] = {};
     cin >> N >> T >> P;
     for(int i = 1; i <= N; ++i){
         for(int j = 1; j <= T; ++j){
