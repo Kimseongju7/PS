@@ -1,5 +1,5 @@
 #include<iostream>
-#include<set>
+#include<unordered_set>
 using namespace std;
 
 
@@ -7,7 +7,7 @@ int main(){
     cin.tie(0)->sync_with_stdio(0);
     int T, N, t;
     cin >> T;
-    set<int> A;
+    unordered_set<int> A;
     T++;
     while(--T){
         cin >> N;
