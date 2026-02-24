@@ -1,10 +1,10 @@
 #include<iostream>
 #include<string>
 using namespace std;
+
 int main(){
     cin.tie(0)->sync_with_stdio(0);
-    long long A[2 << 15 + 1] = {};
-    int T, N; 
+    int T, N; long long A[40000] = {};
     string dap;
     cin >> T; cin.ignore(); 
     while(T--){
