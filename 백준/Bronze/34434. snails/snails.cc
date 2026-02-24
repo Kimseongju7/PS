@@ -1,9 +1,9 @@
 #include<iostream>
 #include<string>
 using namespace std;
-long long A[2 << 17] = {};
 int main(){
     cin.tie(0)->sync_with_stdio(0);
+    long long A[2 << 15 + 1] = {};
     int T, N; 
     string dap;
     cin >> T; cin.ignore(); 
